@@ -7,7 +7,6 @@ import requests
 
 app = Flask(__name__)
 
-
 # Load env file
 load_dotenv()
 
@@ -15,6 +14,7 @@ load_dotenv()
 aplos_token_url = os.getenv("APLOS_TOKEN_URL")
 aplos_id = os.getenv("APLOS_ID")
 aplos_secret = os.getenv("APLOS_SECRET")
+aplos_base_url = os.getenv("APLOS_BASE_URL")
 
 # Virtuous global variables
 virtuous_token_url = os.getenv("VIRTUOUS_TOKEN_URL")
@@ -22,7 +22,7 @@ virtuous_username = os.getenv("VIRTUOUS_USERNAME")
 virtuous_password = os.getenv("VIRTUOUS_PASSWORD")
 
 
-# Gets access token
+# Gets aplos access token
 def get_access_token_aplos():
 
     # Gets data from .env file
@@ -45,6 +45,7 @@ def get_access_token_aplos():
     # Return token from json
     return token_info["data"]["token"]
 
+# Gets virtuous access token
 def get_access_token_virtuous():
 
     # Gets data from .env file
@@ -67,6 +68,21 @@ def get_access_token_virtuous():
     # Return token from json
     return token_info["access_token"]
 
+# Get aplos accounts
+def applos_accounts_get():
+    headers = {"Authorization": "Bearer {}".format(get_access_token_aplos())}
+    url = f"{aplos_base_url}accounts"
+
+    # for debugging
+    print(headers)
+
+    r = requests.get(url, headers=headers)
+    response = r.json()
+    print("JSON response: {}".format(response))
+    return (response)
+
+
+# Main function
 @app.route("/")
 def main():
     #Initialize token list
@@ -83,5 +99,7 @@ def main():
     virtuous_token = get_access_token_virtuous()
     print("Access token from Virtuous received!\n")
     token_list.append(virtuous_token)
+
+    applos_accounts_get()
 
     return jsonify(token_list)
