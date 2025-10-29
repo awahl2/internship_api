@@ -24,7 +24,9 @@ virtuous_password = os.getenv("VIRTUOUS_PASSWORD")
 
 # Gets aplos access token
 def get_access_token_aplos():
-
+    # Debug: Print the URL being used
+    print(f"DEBUG: Token URL = '{aplos_token_url}'")
+    
     # Gets data from .env file
     data = {
         "grant_type": "client_credentials",
@@ -32,13 +34,18 @@ def get_access_token_aplos():
         "client_secret": aplos_secret
     }
 
-    response = requests.post(aplos_token_url, data=data, headers={
-        "Content-Type": "application/x-www-form-urlencoded"
-    })
+    try:
+        response = requests.post(aplos_token_url, data=data, headers={
+            "Content-Type": "application/x-www-form-urlencoded"
+        })
+    except requests.exceptions.ConnectionError as e:
+        print(f"ERROR: Could not connect to {aplos_token_url}")
+        print(f"Connection error details: {e}")
+        raise
 
     # Checks for codes other than 200 (200 Code: API Accessed Successfully)
-    if response.status_code != 200:
-        raise Exception(f"Failed to get access token: {response.status_code} {response.text}")
+    #if response.status_code != 200:
+        #raise Exception(f"Failed to get access token: {response.status_code} {response.text}")
 
     token_info = response.json()
 
@@ -71,11 +78,19 @@ def get_access_token_virtuous():
 # Get aplos accounts
 def applos_accounts_get():
     headers = {"Authorization": "Bearer {}".format(get_access_token_aplos())}
+
+    # establish and error check url
+    base_url = aplos_base_url
+    if not base_url.startswith("http"):
+        base_url = "https://" + base_url
+    if not base_url.endswith("/"):
+        base_url += "/"
     url = f"{aplos_base_url}accounts"
 
     # for debugging
     print(headers)
 
+    print("Requesting Aplos URL:", url)
     r = requests.get(url, headers=headers)
     response = r.json()
     print("JSON response: {}".format(response))
