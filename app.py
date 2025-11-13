@@ -1,140 +1,239 @@
+# .env file format:
+
+"""
+# Aplos Keys
+APLOS_CLIENT_ID=""
+APLOS_PRIVATE_KEY_PATH=""
+APLOS_TOKEN_URL=https://app.aplos.com/hermes/api/v1/partners/verify
+APLOS_BASE_URL=https://app.aplos.com/hermes/api/v1
+
+
+# Virtuous Keys
+VIRTUOUS_USERNAME=""
+VIRTUOUS_PASSWORD=""
+VIRTUOUS_TOKEN_URL=https://api.virtuoussoftware.com/Token
+"""
+
 # Use "flask --app app run" To Run
 
 from flask import Flask, jsonify
 import os
-from dotenv import load_dotenv, dotenv_values 
+from dotenv import load_dotenv
 import requests
+import base64
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.backends import default_backend
 
 app = Flask(__name__)
 
-# Load env file
+# Load environment variables
 load_dotenv()
 
-# Aplos global variables
-aplos_token_url = os.getenv("APLOS_TOKEN_URL")
-aplos_id = os.getenv("APLOS_ID")
-aplos_secret = os.getenv("APLOS_SECRET")
+# Aplos configuration
+aplos_client_id = os.getenv("APLOS_CLIENT_ID")
+aplos_private_key = os.getenv("APLOS_PRIVATE_KEY")
 aplos_base_url = os.getenv("APLOS_BASE_URL")
 
-# Virtuous global variables
+# Virtuous configuration
 virtuous_token_url = os.getenv("VIRTUOUS_TOKEN_URL")
 virtuous_username = os.getenv("VIRTUOUS_USERNAME")
 virtuous_password = os.getenv("VIRTUOUS_PASSWORD")
 
+# Debug: Verify variables are loaded
+print("=" * 50)
+print("ENVIRONMENT VARIABLES CHECK:")
+print(f"APLOS_CLIENT_ID: {aplos_client_id}")
+print(f"APLOS_PRIVATE_KEY: {aplos_private_key}")
+print(f"APLOS_BASE_URL: {aplos_base_url}")
+print("=" * 50)
 
-# Gets aplos access token
+
+def load_private_key_from_env():
+    """Load RSA private key from environment variable"""
+    key_data = os.getenv("APLOS_PRIVATE_KEY")
+    if not key_data:
+        raise Exception("APLOS_PRIVATE_KEY not found in .env")
+
+    try:
+        # Convert escaped newlines to actual newlines
+        key_data = key_data.replace('\\n', '\n')
+
+        private_key = serialization.load_pem_private_key(
+            key_data.encode('utf-8'),
+            password=None,
+            backend=default_backend()
+        )
+        return private_key
+    except Exception as e:
+        raise Exception(f"Error loading private key from environment: {e}")
+
+
+def decrypt_token(encrypted_token_base64, private_key):
+    """Decrypt the Aplos token using the private RSA key"""
+    try:
+        # Decode the base64 encoded token
+        encrypted_token = base64.b64decode(encrypted_token_base64)
+        
+        # Decrypt using RSA private key
+        decrypted_token = private_key.decrypt(
+            encrypted_token,
+            padding.PKCS1v15()  # Aplos uses PKCS1 padding
+        )
+        
+        # Return as string
+        return decrypted_token.decode('utf-8')
+    except Exception as e:
+        raise Exception(f"Error decrypting token: {e}")
+
+
 def get_access_token_aplos():
-    # Debug: Print the URL being used
-    print(f"DEBUG: Token URL = '{aplos_token_url}'")
+    """Get and decrypt Aplos API access token"""
     
-    # Gets data from .env file
-    data = {
-        "grant_type": "client_credentials",
-        "client_id": aplos_id,
-        "client_secret": aplos_secret
-    }
-
-    try:
-        response = requests.post(aplos_token_url, data=data, headers={
-            "Content-Type": "application/x-www-form-urlencoded"
-        })
-        
-        # Debug: Print response details
-        print(f"DEBUG: Response Status Code = {response.status_code}")
-        print(f"DEBUG: Response Headers = {response.headers}")
-        print(f"DEBUG: Response Text = '{response.text}'")
-        
-    except requests.exceptions.ConnectionError as e:
-        print(f"ERROR: Could not connect to {aplos_token_url}")
-        print(f"Connection error details: {e}")
-        raise
-
-    # Check for non-200 status codes BEFORE trying to parse JSON
-    if response.status_code != 200:
-        raise Exception(f"Failed to get access token: {response.status_code} {response.text}")
-
-    # Check if response has content before parsing
-    if not response.text:
-        raise Exception(f"Empty response received from Aplos API. Status: {response.status_code}")
+    # Validate environment variables
+    if not aplos_client_id:
+        raise ValueError("APLOS_CLIENT_ID not set in .env file")
+    if not aplos_private_key:
+        raise ValueError("APLOS_PRIVATE_KEY not set in .env file")
+    
+    # Step 1: Request encrypted token from Aplos
+    auth_url = f"https://app.aplos.com/hermes/api/v1/auth/{aplos_client_id}"
+    
+    print(f"Requesting encrypted token from: {auth_url}")
     
     try:
-        token_info = response.json()
-    except requests.exceptions.JSONDecodeError as e:
-        print(f"ERROR: Failed to parse JSON response")
-        print(f"Response text was: '{response.text}'")
-        raise Exception(f"Invalid JSON response from Aplos API: {e}")
+        response = requests.get(auth_url)
+        response.raise_for_status()
+        
+        token_data = response.json()
+        
+        # Extract encrypted token from response
+        encrypted_token = token_data["data"]["token"]
+        print(f"Received encrypted token (first 50 chars): {encrypted_token[:50]}...")
+        
+        # Step 2: Load private key
+        print("Loading private key...")
+        private_key = load_private_key_from_env()
+        
+        # Step 3: Decrypt the token
+        print("Decrypting token...")
+        decrypted_token = decrypt_token(encrypted_token, private_key)
+        
+        print("✓ Token successfully decrypted!")
+        return decrypted_token
+        
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Failed to request Aplos token: {e}")
+    except KeyError as e:
+        raise Exception(f"Unexpected response format: {token_data}. Missing key: {e}")
+    except Exception as e:
+        raise Exception(f"Aplos authentication error: {e}")
 
-    # Return token from json
-    return token_info["data"]["token"]
 
-'''
-# Gets virtuous access token
 def get_access_token_virtuous():
-
-    # Gets data from .env file
+    """Get Virtuous API access token"""
+    
+    if not all([virtuous_token_url, virtuous_username, virtuous_password]):
+        raise ValueError("Missing Virtuous credentials in .env file")
+    
     data = {
         "grant_type": "password",
         "username": virtuous_username,
         "password": virtuous_password
     }
-
-    response = requests.post(virtuous_token_url, data=data, headers={
+    
+    headers = {
         "Content-Type": "application/x-www-form-urlencoded"
-    })
-
-    # Checks for codes other than 200 (200 Code: API Accessed Successfully)
-    if response.status_code != 200:
-        raise Exception(f"Failed to get Virtuous token: {response.status_code} {response.text}")
-
-    token_info = response.json()
-
-    # Return token from json
-    return token_info["access_token"]
-
-# Get aplos accounts
-def aplos_accounts_get():
-    headers = {"Authorization": "Bearer {}".format(get_access_token_aplos())}
-
-    # establish and error check url
-    base_url = aplos_base_url
-    if not base_url.startswith("http"):
-        base_url = "https://" + base_url
-    if not base_url.endswith("/"):
-        base_url += "/"
-    url = f"{base_url}accounts"  # Fixed: use base_url instead of aplos_base_url
-
-    # for debugging
-    print(f"DEBUG: Authorization header: {headers}")
-    print(f"DEBUG: Requesting Aplos URL: {url}")
+    }
     
-    r = requests.get(url, headers=headers)
-    
-    print(f"DEBUG: Accounts response status: {r.status_code}")
-    print(f"DEBUG: Accounts response text: {r.text}")
-    
-    response = r.json()
-    print("JSON response: {}".format(response))
-    return (response)
-'''
+    try:
+        response = requests.post(virtuous_token_url, data=data, headers=headers)
+        response.raise_for_status()
+        
+        token_info = response.json()
+        return token_info["access_token"]
+        
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Virtuous API error: {e}")
 
-# Main function
+
+def aplos_accounts_get(access_token):
+    """Get accounts from Aplos using the decrypted token"""
+    
+    url = f"{aplos_base_url}accounts"
+    
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+    
+    print(f"Fetching accounts from: {url}")
+    
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        accounts_data = response.json()
+        print(f"✓ Successfully retrieved {accounts_data['meta']['resource_count']} accounts")
+        
+        return accounts_data
+        
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Failed to fetch Aplos accounts: {e}")
+
+
 @app.route("/")
 def main():
-    #Initialize token list
-    token_list = []
+    """Main endpoint to test API authentication"""
+    
+    results = {}
+    
+    # Test Aplos API
+    try:
+        print("\n" + "="*50)
+        print("Testing Aplos API...")
+        print("="*50)
+        
+        aplos_token = get_access_token_aplos()
+        results["aplos"] = {
+            "status": "success",
+            "token_preview": aplos_token[:20] + "..." if aplos_token else None
+        }
+        
+        # Optional: Test fetching accounts
+        # accounts = aplos_accounts_get(aplos_token)
+        # results["aplos"]["sample_account"] = accounts["data"]["accounts"][0] if accounts["data"]["accounts"] else None
+        
+    except Exception as e:
+        results["aplos"] = {
+            "status": "error",
+            "message": str(e)
+        }
+        print(f"✗ Aplos error: {e}")
+    
+    # Test Virtuous API
+    try:
+        print("\n" + "="*50)
+        print("Testing Virtuous API...")
+        print("="*50)
+        
+        virtuous_token = get_access_token_virtuous()
+        results["virtuous"] = {
+            "status": "success",
+            "token_preview": virtuous_token[:20] + "..." if virtuous_token else None
+        }
+        print("✓ Virtuous token received!")
+        
+    except Exception as e:
+        results["virtuous"] = {
+            "status": "error",
+            "message": str(e)
+        }
+        print(f"✗ Virtuous error: {e}")
+    
+    print("="*50 + "\n")
+    
+    return jsonify(results)
 
-    # Request access token from aplos
-    print("Requesting access token from Aplos...")
-    applos_token = get_access_token_aplos()
-    print("Access token from Aplos received!\n")
-    token_list.append(applos_token)
 
-    # Request access token from virtuous
-    print("Requesting access token from Virtuous...")
-    # virtuous_token = get_access_token_virtuous()
-    # print("Access token from Virtuous received!\n")
-    # token_list.append(virtuous_token)
-
-    # aplos_accounts_get()
-
-    return jsonify(token_list)
+if __name__ == "__main__":
+    app.run(debug=True)
