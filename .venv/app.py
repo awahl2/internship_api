@@ -187,10 +187,10 @@ def main():
     
     results = {}
     
-    # Test Aplos API
+    # Aplos
     try:
         print("\n" + "="*50)
-        print("Testing Aplos API...")
+        print("Accessing Aplos API...")
         print("="*50)
         
         aplos_token = get_access_token_aplos()
@@ -200,8 +200,8 @@ def main():
         }
         
         # Optional: Test fetching accounts
-        # accounts = aplos_accounts_get(aplos_token)
-        # results["aplos"]["sample_account"] = accounts["data"]["accounts"][0] if accounts["data"]["accounts"] else None
+        accounts = aplos_accounts_get(aplos_token)
+        results["aplos"]["sample_account"] = accounts["data"]["accounts"][0] if accounts["data"]["accounts"] else None
         
     except Exception as e:
         results["aplos"] = {
@@ -213,7 +213,7 @@ def main():
     # Test Virtuous API
     try:
         print("\n" + "="*50)
-        print("Testing Virtuous API...")
+        print("Accessing Virtuous API...")
         print("="*50)
         
         virtuous_token = get_access_token_virtuous()
